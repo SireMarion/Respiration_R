@@ -1,0 +1,352 @@
+#Library used
+library(tidyr)
+library(dplyr)
+library(readr)
+library(readxl)
+library(writexl)
+#################################
+#Clear Environments
+#################################
+rm(list=ls())
+##################################
+#Functions used in the code#
+##################################
+# Function for requesting values from the user from an Excel file
+Ask_Values_From_Excel <- function() {
+  # Ask the user to choose the Excel file
+  cat("Select file with observation values")
+  excel_file <- file.choose()
+  
+  # Read the Excel file
+  excel_data <- read_excel(excel_file)
+  
+  return(excel_data)
+}
+###############################
+
+#######################
+#Adaptation Macro VBA#
+#######################
+#Choix des fichiers
+cat("Please select files: \n")
+file_paths <- choose.files(multi = TRUE)
+file_paths
+
+#Définition du nombre de fichiers
+num_files <- length(file_paths)
+num_files<- as.numeric(num_files)
+
+#Directory path.
+Dir_Path<- dirname(file_paths[1])
+cat(Dir_Path)
+# Create the path for the "Results" folder
+Results_Dir_Path <- file.path(Dir_Path, "Graphics")
+
+# Check the existence of the "Results" folder and create it if it does not exist
+if (!file.exists(Results_Dir_Path)) {
+  dir.create(Results_Dir_Path)
+}
+
+#Set the working directory to the "Results" folder
+setwd(Results_Dir_Path)
+
+# List to store Text_Respi objects
+processed_text_respi_list <- list()
+
+for (i in 1:num_files) {
+  # Read the file
+  text_respi <- read_delim(file_paths[i], delim = "\t", escape_double = FALSE,
+                           col_names = FALSE, comment = "*", trim_ws = TRUE)
+  
+  # Find the index of the first line of interest
+  line_index <- which(text_respi$X1 == "Date" & text_respi$X2 == "Time (HH:MM:SS)" & text_respi$X3 == "Time (s)")
+  
+  # Remove lines before the index found
+  text_respi <- text_respi %>%
+    slice(line_index:n())
+  
+  # Rename columns and remove the first row
+  text_respi <- text_respi %>%
+    setNames(make.unique(paste0(text_respi[1, ], "_", seq_along(text_respi)))) %>%
+    slice(-1) %>%
+    mutate_at(c(3, 5, 6, 7, 8), function(col) as.numeric(gsub(",", ".", col)))
+  
+  # Store the processed Text_Respi object
+  processed_text_respi_list[[i]] <- text_respi
+}
+
+# List to store Table_Time_O2 objects
+table_time_o2_list <- list()
+#Creation of vector who store the index of column to remove due to NA values
+columns_to_remove <- NULL
+# Loop to extract specified columns and create Table_Time_O2 for each file
+for (i in 1:num_files) {
+  # Extract specified columns from processed_text_respi_list[[i]]
+  table_time_o2 <- processed_text_respi_list[[i]] %>%
+    select(3, 5, 6, 7, 8)
+  # Store the Table_Time_O2 object
+  table_time_o2_list[[i]] <- table_time_o2
+  for (j in 2:5){
+    print(table_time_o2_list[[i]][[j]])
+    Number_Row <- nrow(table_time_o2_list[[i]])
+    Na_Limit <- (Number_Row * 50 )/ 100
+    if(sum(is.na(table_time_o2_list[[i]][[j]])) > Na_Limit){
+      columns_to_remove <- c(columns_to_remove,j)
+    }
+  }
+  if(is.null(columns_to_remove) == FALSE){
+    table_time_o2_list[[i]] <- table_time_o2_list[[i]][-columns_to_remove]
+    columns_to_remove <- NULL 
+  }
+}
+
+# Loop to update column names of Table_Time_O2 objects
+for (i in 1:num_files) {
+  # Extract the filename from the full path
+  File_Name <- basename(file_paths[i])
+  
+  # Get the file name without extension
+  Name_without_extension <- tools::file_path_sans_ext(File_Name)
+  
+  # Current column names
+  current_colnames <- colnames(table_time_o2_list[[i]])
+  
+  #Get channel number
+  Channel_Number <- substr(colnames(table_time_o2_list[[i]]), 3,3)
+  
+  # Create new column names based on the file name
+  new_colnames <- paste0(Name_without_extension, "_", Channel_Number)
+  
+  # Update dataframe column names
+  colnames(table_time_o2_list[[i]]) <- new_colnames
+}
+
+# List to store Temperature tables
+temperature_table_list <- list()
+Temperature_Column_Position <- 9
+
+# Loop to extract temperature columns and create a table for each file
+for (i in 1:num_files) {
+  # Extract temperature columns from processed_text_respi_list[[i]]
+  temperature_table <- processed_text_respi_list[[i]] %>%
+    select(Temperature_Column_Position)  # Adjust column position as needed
+  
+  # Changing column names 
+  temperature_table <- temperature_table %>%
+    rename(!!paste0("Temperature_", i) := colnames(temperature_table))
+  
+  # Convert all values to numeric
+  temperature_table <- temperature_table %>%
+    mutate_all(~as.numeric(gsub(",", ".", .)))
+  
+  # Store the Temperature table
+  temperature_table_list[[i]] <- temperature_table
+}
+
+################################################################################
+#### New formatted table - End of Macro 1 equivalence
+################################################################################
+################################################################################
+### Automated construction of the Obs table
+################################################################################
+# Number of predefined columns
+number_columns <- 13
+
+# Predefined column names
+column_names <- c("Sample", "Treatment", "Channel", "Bloc", "File", "File_Name", "BL", "EL", "BD", "END", "Date", "Hour" ,"Temperature")
+
+
+##Number of rows in the new table##
+# Initialize variables for counting samples
+Number_Samples <- 0
+# Loop through your list to count the total number of samples
+for (i in seq_along(table_time_o2_list)) {
+  Number_Samples <- Number_Samples + length(table_time_o2_list[[i]]) - 1
+}
+
+# Create an empty table with predefined column names
+Obs_Table <- data.frame(matrix(ncol = number_columns, nrow = Number_Samples))
+colnames(Obs_Table) <- column_names
+
+# Initialise the columns with empty values
+Obs_Table$Sample <- ""
+Obs_Table$Treatment <- character(Number_Samples)
+Obs_Table$File_Name <- ""
+Obs_Table$Channel <- ""
+Obs_Table$Bloc <- 1
+Obs_Table$File <- ""
+Obs_Table$Date <- ""
+Obs_Table$Hour <- ""
+# Initialise the "Temperature" column with empty values
+Obs_Table$Temperature <- numeric(nrow(Obs_Table))
+
+# Ask for values from Excel file Times and files
+excel_data <- Ask_Values_From_Excel()
+
+# Initialize variable for row indexing
+row_index <- 1
+
+# Loop through your list to fill the corresponding columns
+for (i in seq_along(table_time_o2_list)) {
+  # Extract sample names for the current file
+  sample_names <- colnames(table_time_o2_list[[i]])[-1] # Exclude the first column
+  
+  # Fill Sample column
+  Obs_Table$Sample[row_index:(row_index + length(sample_names) - 1)] <- sample_names
+  
+  #Fill Date column
+  Obs_Table$Date[row_index:(row_index + length(sample_names) - 1)] <- processed_text_respi_list[[i]][[1]][1]
+  
+  #Fill Hour column
+  Obs_Table$Hour[row_index:(row_index + length(sample_names) - 1)] <- processed_text_respi_list[[i]][[2]][1]
+  
+  # Fill Channel column
+  Obs_Table$Channel[row_index:(row_index + length(sample_names) - 1)] <- substr(sample_names, nchar(sample_names), nchar(sample_names))
+  
+  # Fill File column
+  Obs_Table$File[row_index:(row_index + length(sample_names) - 1)] <- i
+  
+  # Fill Temperature column
+  file_value <- i
+  temperature_col <- paste0("Temperature_", file_value)
+  mean_value <- mean(temperature_table_list[[i]][[temperature_col]], na.rm = TRUE)
+  Obs_Table$Temperature[row_index:(row_index + length(sample_names) - 1)] <- mean_value
+  
+  # Extract the filename from the full path
+  nom_fichier <- basename(file_paths[i])
+  
+  # Get the file name without extension
+  nom_sans_extension <- tools::file_path_sans_ext(nom_fichier)
+  nom_sans_extension
+  length(sample_names)
+  # Assign the file name without extension in the Treatment column.
+  Obs_Table$File_Name[row_index:(row_index + length(sample_names) - 1)] <- rep(nom_sans_extension, length(sample_names))
+  
+  # Update Obs_Table with values from Excel file
+  matching_row <- which(excel_data$File == nom_sans_extension)
+  # Fill Treatment and BL, EL, BD, END columns
+  if (length(matching_row) > 0) {
+    for (j in seq_along(sample_names)) {
+      channel_value <- as.numeric(Obs_Table$Channel[row_index + j - 1])
+      if (!is.na(channel_value) && channel_value %in% 1:4) {
+        channel_column <- paste0("Channel_", channel_value)
+        #Check if column exists in excel_data
+        if (channel_column %in% colnames(excel_data)) {
+          # Convert the value to a simple vector with unlist()
+          treatment_value <- unlist(excel_data[matching_row, channel_column])
+          Obs_Table$Treatment[row_index + j - 1] <- treatment_value
+        } else {
+          # Leave the Treatment column empty if the corresponding column does not exist
+          Obs_Table$Treatment[row_index + j - 1] <- nom_sans_extension
+        }
+      }
+    }
+    Obs_Table$BL[row_index:(row_index + length(sample_names) - 1)] <- excel_data$BL[matching_row]
+    Obs_Table$EL[row_index:(row_index + length(sample_names) - 1)] <- excel_data$EL[matching_row]
+    Obs_Table$BD[row_index:(row_index + length(sample_names) - 1)] <- excel_data$BD[matching_row]
+    Obs_Table$END[row_index:(row_index + length(sample_names) - 1)] <- excel_data$END[matching_row]
+  } else {
+    cat("No matching values found for file:", nom_sans_extension, "\n")
+  }
+  # Update row_index for the next iteration
+  row_index <- row_index + length(sample_names)
+}
+####################################Final#######################################
+# Display a confirmation of the table
+#cat("The final table is :\n")
+#print(Obs_Table)
+# Save the Obs_Table table in txt format
+#write.table(Obs_Table, "Obs_Table.txt", sep="\t", row.names=FALSE)
+################################################################################
+###                       Automated slope processing                         ###
+################################################################################
+# Create the vectors to store the coefficients
+photo <- NULL
+respi <- NULL
+
+
+# Loop through each file in table_time_o2_list
+ref_Obs<-0
+for (file_index in seq_along(table_time_o2_list)) {
+  # Extracting data for the current file
+  Ti <- table_time_o2_list[[file_index]][[1]]  
+  O2_list <- table_time_o2_list[[file_index]][2:length(table_time_o2_list[[file_index]])]
+
+  # Loop through each sample in the current file
+  for (local_index in 1:length(O2_list)) {
+    # Index in Obs_Table"
+    ref_Obs<-ref_Obs+1
+    #print(paste0('iteration',file_index,local_index,ref_Obs))
+    # Recovery of data for the i-th sample
+    O2 <- O2_list[[local_index ]]
+    
+    # Creating a colour vector
+    color <- rep('black', length(Ti))
+    color[which(Ti > Obs_Table$BL[ref_Obs] & Ti < Obs_Table$EL[ref_Obs])] <- 'red'
+    color[which(Ti > Obs_Table$BD[ref_Obs])] <- 'blue'
+    
+    # Plot
+    png(filename = paste0("graph_", Obs_Table$Sample[ref_Obs], ".png"))  # Sauvegarde du graphique de base
+    plot(Ti, O2, pch=20, col=color, main=Obs_Table$Sample[ref_Obs])
+    dev.off()
+    
+    # Selection of points for photosynthesis (p)
+    idx_p <- which(Ti > Obs_Table$BL[ref_Obs] & Ti < Obs_Table$EL[ref_Obs])
+    
+    # Selection of points for breathing (r)
+    idx_r <- which(Ti > Obs_Table$BD[ref_Obs] & Ti < Obs_Table$END[ref_Obs])
+    
+    # Linear regression for photosynthesis (p)
+    p <- lm(O2[idx_p] ~ Ti[idx_p])
+    
+    # Plot with abline(p)
+    png(filename = paste0("graph_p_", Obs_Table$Sample[ref_Obs], ".png"))  # Sauvegarde du graphique avec abline(p)
+    plot(Ti, O2, pch=20, col=color, main=Obs_Table$Sample[ref_Obs])
+    abline(p)
+    dev.off()
+    
+    # Saving photosynthesis coefficients
+    photo <- c(photo, coef(p)[2])
+    
+    # Linear regression for respiration (r)
+    r <- lm(O2[idx_r] ~ Ti[idx_r])
+    
+    # Plot with abline(r)
+    png(filename = paste0("graph_r_", Obs_Table$Sample[ref_Obs], ".png"))  # Sauvegarde du graphique avec abline(r)
+    plot(Ti, O2, pch=20, col=color, main=Obs_Table$Sample[ref_Obs])
+    abline(r)
+    dev.off()
+    
+    # Saving breathing coefficients
+    respi <- c(respi, coef(r)[2])
+  }
+}
+
+#Creation of a table of dissolved 02 (mg/L) as a function of temperature
+O2dissous <- data.frame(Temp=c(0:40), O2=c(14.621, 14.216, 13.829, 13.46, 13.107, 12.77, 
+                                           12.447, 12.139, 11.843, 11.559, 11.288, 11.027, 10.777, 10.537, 10.306, 
+                                           10.084, 9.87, 9.665, 9.467, 9.276, 9.092, 8.914, 8.743, 8.578, 8.418, 8.263, 
+                                           8.113, 7.968, 7.827, 7.691, 7.558, 7.43, 7.305, 7.183, 7.065, 6.949, 6.837, 
+                                           6.727, 6.619, 6.514, 6.412))
+
+O2photo <- NULL
+O2respi <- NULL
+
+for (i in seq_along(Obs_Table$Sample)){
+  O2photo[i] <- photo[i]/100*O2dissous$O2[O2dissous$Temp==round(Obs_Table$Temperature[i])]*3600*0.007
+  O2respi[i] <- respi[i]/100*O2dissous$O2[O2dissous$Temp==round(Obs_Table$Temperature[i])]*3600*0.007
+}
+
+#Creating a dataframe with slopes
+Slope_Table <- data.frame(Sample=Obs_Table$Sample, PhotoNette=O2photo, 
+                          PhotoBrute=(O2photo-O2respi), Respi=O2respi,
+                          Treatment = Obs_Table$Treatment, File_Name = Obs_Table$File_Name,
+                          Date = Obs_Table$Date, Hour = Obs_Table$Hour,
+                          File=Obs_Table$File, Channel=Obs_Table$Channel, 
+                          Temperature = Obs_Table$Temperature, BL = Obs_Table$BL, 
+                          EL = Obs_Table$EL, BD = Obs_Table$BD, END = Obs_Table$END, 
+                          Bloc=Obs_Table$Bloc)
+
+#Save the slope table in a xlsx file at the text file level
+setwd(Dir_Path)
+write_xlsx(Slope_Table, "Final_Slopes.xlsx")
