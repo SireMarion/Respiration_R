@@ -8,47 +8,25 @@ library(writexl)
 #Clear Environments
 #################################
 rm(list=ls())
-##################################
-#Functions used in the code#
-##################################
-# Function for requesting values from the user from an Excel file
-Ask_Values_From_Excel <- function() {
-  # Ask the user to choose the Excel file
-  cat("Select file with observation values")
-  excel_file <- file.choose()
-  
-  # Read the Excel file
-  excel_data <- read_excel(excel_file)
-  
-  return(excel_data)
-}
 ###############################
 
 #######################
 #Adaptation Macro VBA#
 #######################
 #Choix des fichiers
-cat("Please select files: \n")
-file_paths <- choose.files(multi = TRUE)
+file_paths <- NULL
+file_paths <- list.files("Path_folder_containing_text_files", pattern='txt')
 file_paths
 
-#Définition du nombre de fichiers
+#Directory path.
+setwd("Where we want to save the result files ")
+
+# Ask for values from Excel file Times and files
+excel_data <- read_excel("File_Name.xlsx")
+
+#Definition of the number of file
 num_files <- length(file_paths)
 num_files<- as.numeric(num_files)
-
-#Directory path.
-Dir_Path<- dirname(file_paths[1])
-cat(Dir_Path)
-# Create the path for the "Results" folder
-Results_Dir_Path <- file.path(Dir_Path, "Graphics")
-
-# Check the existence of the "Results" folder and create it if it does not exist
-if (!file.exists(Results_Dir_Path)) {
-  dir.create(Results_Dir_Path)
-}
-
-#Set the working directory to the "Results" folder
-setwd(Results_Dir_Path)
 
 # List to store Text_Respi objects
 processed_text_respi_list <- list()
@@ -179,9 +157,6 @@ Obs_Table$Date <- ""
 Obs_Table$Hour <- ""
 # Initialise the "Temperature" column with empty values
 Obs_Table$Temperature <- numeric(nrow(Obs_Table))
-
-# Ask for values from Excel file Times and files
-excel_data <- Ask_Values_From_Excel()
 
 # Initialize variable for row indexing
 row_index <- 1
@@ -348,5 +323,4 @@ Slope_Table <- data.frame(Sample=Obs_Table$Sample, PhotoNette=O2photo,
                           Bloc=Obs_Table$Bloc)
 
 #Save the slope table in a xlsx file at the text file level
-setwd(Dir_Path)
 write_xlsx(Slope_Table, "Final_Slopes.xlsx")
